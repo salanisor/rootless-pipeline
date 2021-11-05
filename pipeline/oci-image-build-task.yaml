@@ -1,0 +1,282 @@
+apiVersion: tekton.dev/v1beta1
+kind: ClusterTask
+metadata:
+  annotations:
+    tekton.dev/displayName: Build OCI Image
+    tekton.dev/pipelines.minVersion: '0.19'
+    tekton.dev/tags: 'image, build, oci, docker, buildah'
+  labels:
+    app.kubernetes.io/instance: pipeline-clustertasks
+  name: oci-image-build
+spec:
+  description: >
+    Manages the workflow for building an OCI image:
+
+    * Build image using buildah bud
+
+    * Create imagestream in current namespace (and in specified additional
+    namespaces)
+      - Sets specified labels, annotations, and local lookup policy
+      - Adds labels for `app.kubernetes.io/managed-by=tekton` and `clmrs.faa.gov/managed-by=tekton`
+    * Push image built to imagestream in current namespace
+
+    * Tag imagestream with latest and specified tags (and in specified
+    additional namespaces)
+      - Sets specified labels and annotations
+      - Add build-specific annotations to each imagestreamtag resource:
+        `build.clmrs.faa.gov/build-id=<TASK_RUN_UID>`
+        `build.clmrs.faa.gov/namespace=<TASK_NAMESPACE>`
+        `build.clmrs.faa.gov/vcs-url=<VCS_URL>`
+        `build.clmrs.faa.gov/vcs-revision=<VCS_REVISION>`
+        `build.clmrs.faa.gov/vcs-branch=<VCS_BRANCH>`
+        `build.clmrs.faa.gov/vcs-context=<CONTEXT_DIR>`
+  params:
+    - default: ''
+      description: path to file containing image reference (or provide IMAGE_NAME)
+      name: IMAGE_FILE
+      type: string
+    - default: ''
+      description: name of image (or provide IMAGE_FILE)
+      name: IMAGE_NAME
+      type: string
+    - default: ''
+      description: path to file containing space or line delimited tags for image
+      name: TAGS_FILE
+      type: string
+    - default: ''
+      description: space delimited tags for image
+      name: TAGS
+      type: string
+    - default: 'false'
+      description: local lookupPolicy of imagestream resource
+      name: LOOKUP_POLICY_LOCAL
+      type: string
+    - default: ''
+      description: line delimited list of labels (name=value) for imagestream resource
+      name: LABELS
+      type: string
+    - default: ''
+      description: >-
+        path to file containing line delimited list of labels (name=value) for
+        imagestream resource
+      name: LABELS_FILE
+      type: string
+    - default: ''
+      description: line delimited list of annotations (name=value) for imagestream resource
+      name: ANNOTATIONS
+      type: string
+    - default: ''
+      description: >-
+        path to file containing line delimited list of annotations (name=value)
+        for imagestream resource
+      name: ANNOTATIONS_FILE
+      type: string
+    - default: ''
+      description: additional namespaces to create imagestream and push image with tags
+      name: ADD_NAMESPACES
+      type: string
+    - name: CONTEXT_DIR
+      type: string
+    - default: ''
+      description: script command used to build image (defaults to IMAGE_BUILD parameter)
+      name: SCRIPT
+      type: string
+    - default: buildah --storage-driver=vfs bud
+      description: command used by script to invoke image build (defaults to buildah bud)
+      name: IMAGE_BUILD
+      type: string
+    - default: ''
+      description: additional build args used by script to during image build
+      name: IMAGE_BUILD_ARGS
+      type: string
+    - default: IMAGE_BUILD
+      description: name of env var containing OCI image build command
+      name: IMAGE_BUILD_VAR
+      type: string
+    - default: IMAGE_BUILD_ARGS
+      description: name of env var containing OCI image build command arguments
+      name: IMAGE_BUILD_ARGS_VAR
+      type: string
+    - default: 'image-registry.openshift-image-registry.svc:5000/openshift/image-builder'
+      description: image used for steps in this clustertask (advanced use only)
+      name: BUILDER_IMAGE
+      type: string
+  results:
+    - description: id of image just built
+      name: IMAGE_ID
+    - description: image just built
+      name: IMAGE
+    - description: name of image just built
+      name: IMAGE_NAME
+    - description: digest of the image just built
+      name: IMAGE_DIGEST
+    - description: tags of the image just built
+      name: IMAGE_TAGS
+  steps:
+    - env:
+        - name: SCRIPT
+          value: $(params.SCRIPT)
+        - name: IMAGE_BUILD
+          value: $(params.IMAGE_BUILD)
+        - name: IMAGE_BUILD_ARGS
+          value: $(params.IMAGE_BUILD_ARGS)
+        - name: IMAGE_BUILD_VAR
+          value: $(params.IMAGE_BUILD_VAR)
+        - name: IMAGE_BUILD_ARGS_VAR
+          value: $(params.IMAGE_BUILD_ARGS_VAR)
+        - name: RESULTS_IMAGE_ID_PATH
+          value: $(results.IMAGE_ID.path)
+      image: $(params.BUILDER_IMAGE)
+      name: build-image
+      resources: {}
+      script: >
+        export IMAGE_BUILD_ARGS="--iidfile ${RESULTS_IMAGE_ID_PATH}
+        ${IMAGE_BUILD_ARGS}"
+
+        build_image.sh
+      volumeMounts:
+        - mountPath: /var/lib/containers
+          name: varlibcontainers
+      workingDir: $(workspaces.source.path)/$(params.CONTEXT_DIR)
+    - env:
+        - name: IMAGE_FILE
+          value: $(params.IMAGE_FILE)
+        - name: IMAGE_NAME
+          value: $(params.IMAGE_NAME)
+        - name: LOOKUP_POLICY_LOCAL
+          value: $(params.LOOKUP_POLICY_LOCAL)
+        - name: LABELS
+          value: $(params.LABELS)
+        - name: LABELS_FILE
+          value: $(params.LABELS_FILE)
+        - name: ANNOTATIONS
+          value: $(params.ANNOTATIONS)
+        - name: ANNOTATIONS_FILE
+          value: $(params.ANNOTATIONS_FILE)
+        - name: ADD_NAMESPACES
+          value: $(params.ADD_NAMESPACES)
+        - name: TASK_NAMESPACE
+          value: $(context.taskRun.namespace)
+        - name: RESULTS_IMAGE_NAME_PATH
+          value: $(results.IMAGE_NAME.path)
+      image: $(params.BUILDER_IMAGE)
+      name: imagestreams
+      resources: {}
+      script: |
+        #!/usr/bin/env bash
+        set -euxo pipefail
+
+        # resolve name portion of image
+        if [ -z "$IMAGE_NAME" ]; then
+          if [ -n "$IMAGE_FILE" ]; then
+            IMAGE_NAME=$(cat "$IMAGE_FILE" | xargs basename | cut -d: -f1)
+          else
+            IMAGE_NAME=$(pwd | xargs basename)
+          fi
+        fi
+        printf '%s' "$IMAGE_NAME" > "$RESULTS_IMAGE_NAME_PATH"
+
+        export NAME="$IMAGE_NAME"
+        export LABELS="$LABELS"
+        imagestream.sh
+
+        for ns in $ADD_NAMESPACES; do
+          NAMESPACE=$ns imagestream.sh
+        done
+      workingDir: $(workspaces.source.path)/$(params.CONTEXT_DIR)
+    - env:
+        - name: TASK_NAMESPACE
+          value: $(context.taskRun.namespace)
+        - name: RESULTS_IMAGE_PATH
+          value: $(results.IMAGE.path)
+        - name: RESULTS_IMAGE_NAME_PATH
+          value: $(results.IMAGE_NAME.path)
+        - name: RESULTS_IMAGE_DIGEST_PATH
+          value: $(results.IMAGE_DIGEST.path)
+        - name: RESULTS_IMAGE_ID_PATH
+          value: $(results.IMAGE_ID.path)
+      image: $(params.BUILDER_IMAGE)
+      name: push-image
+      resources: {}
+      script: >
+        export IMAGE_ID=$(cat "$RESULTS_IMAGE_ID_PATH")
+
+        export DEST_IMAGE_REPO="${TASK_NAMESPACE}/$(cat
+        "$RESULTS_IMAGE_NAME_PATH")"
+
+        export DIGEST_FILE="$RESULTS_IMAGE_DIGEST_PATH"
+
+        export OUT_IMAGE_FILE="$RESULTS_IMAGE_PATH"
+
+
+        push_image.sh
+      volumeMounts:
+        - mountPath: /var/lib/containers
+          name: varlibcontainers
+      workingDir: $(workspaces.source.path)/$(params.CONTEXT_DIR)
+    - env:
+        - name: IMAGE_FILE
+          value: $(params.IMAGE_FILE)
+        - name: DEST_TAGS
+          value: $(params.TAGS)
+        - name: DEST_TAGS_FILE
+          value: $(params.TAGS_FILE)
+        - name: DEST_LABELS
+          value: $(params.LABELS)
+        - name: DEST_LABELS_FILE
+          value: $(params.LABELS_FILE)
+        - name: DEST_ANNOTATIONS
+          value: $(params.ANNOTATIONS)
+        - name: DEST_ANNOTATIONS_FILE
+          value: $(params.ANNOTATIONS_FILE)
+        - name: ADD_NAMESPACES
+          value: $(params.ADD_NAMESPACES)
+        - name: CONTEXT_DIR
+          value: $(params.CONTEXT_DIR)
+        - name: TASK_NAMESPACE
+          value: $(context.taskRun.namespace)
+        - name: TASK_RUN_UID
+          value: $(context.taskRun.uid)
+        - name: WORKSPACE_SOURCE_PATH
+          value: $(workspaces.source.path)
+        - name: RESULTS_IMAGE_NAME_PATH
+          value: $(results.IMAGE_NAME.path)
+        - name: RESULTS_IMAGE_DIGEST_PATH
+          value: $(results.IMAGE_DIGEST.path)
+        - name: RESULTS_IMAGE_TAGS_PATH
+          value: $(results.IMAGE_TAGS.path)
+      image: $(params.BUILDER_IMAGE)
+      name: imagestreamtags
+      resources: {}
+      script: |
+        #!/usr/bin/env bash
+        set -euxo pipefail
+
+        export SRC_IMAGE_STREAM=$(cat "$RESULTS_IMAGE_NAME_PATH")
+        export SRC_DIGEST=$(cat "$RESULTS_IMAGE_DIGEST_PATH")
+
+        DEST_TAGS="latest ${DEST_TAGS}"
+        if [ -n "$IMAGE_FILE" ]; then
+          img=$(cat "$IMAGE_FILE" | xargs basename)
+          if [[ "$img" == *:* ]]; then
+            DEST_TAGS="${DEST_TAGS} $(cut -d: -f2 <<< "$img")"
+          fi
+        fi
+        export DEST_TAGS
+
+        export DEST_LABELS="${DEST_LABELS}"
+        build_annotations=$(build_annotations.sh)
+        export DEST_ANNOTATIONS="${DEST_ANNOTATIONS}
+        ${build_annotations}"
+
+        OUT_TAGS_FILE="$RESULTS_IMAGE_TAGS_PATH" imagestreamtag.sh
+
+        for ns in $ADD_NAMESPACES; do
+          DEST_NAMESPACE=$ns imagestreamtag.sh
+        done
+      workingDir: $(workspaces.source.path)/$(params.CONTEXT_DIR)
+  volumes:
+    - emptyDir: {}
+      name: varlibcontainers
+  workspaces:
+    - name: source

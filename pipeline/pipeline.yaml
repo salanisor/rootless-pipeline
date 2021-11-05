@@ -1,0 +1,70 @@
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: oracle-database-base-image-build
+  namespace: pipelines-tutorial
+spec:
+  params:
+    - default: 'https://github.com/salanisor/rootless-pipeline.git'
+      name: GIT_URL
+      type: string
+    - default: oracle-database-base-image-build
+      name: PKR_VARS_SECRET_REF
+      type: string
+    - default: main
+      name: GIT_REVISION
+      type: string
+    - default: 19.3.0
+      name: DATABASE_VERSION
+      type: string
+    - default: dockerfiles
+      name: CONTEXT_DIR
+      type: string
+    - default: SLIMMING=false
+      name: BUILD_ARG
+      type: string
+    - default: >-
+        quay.io/canit0/buildah:latest
+      name: BUILDER_IMAGE
+      type: string
+  tasks:
+    - name: git-checkout
+      params:
+        - name: url
+          value: $(params.GIT_URL)
+        - name: revision
+          value: $(params.GIT_REVISION)
+        - name: sparseCheckoutDirectories
+          value: $(params.CONTEXT_DIR)
+      taskRef:
+        kind: ClusterTask
+        name: git-clone
+      workspaces:
+        - name: output
+          workspace: shared-workspace
+    - name: build-image
+      params:
+        - name: CONTEXT_DIR
+          value: $(params.CONTEXT_DIR)/$(params.DATABASE_VERSION)
+        - name: LABELS_FILE
+          value: .pipeline/image-labels
+        - name: IMAGE_BUILD
+          value: buildah --storage-driver=vfs bud
+        - name: IMAGE_NAME
+          value: oracle-database
+        - name: SCRIPT
+          value: >
+            buildah bud --storage-driver vfs --build-arg SLIMMING=False
+            --build-arg DB_EDITION=19.3.0 -t oracle-database
+        - name: BUILDER_IMAGE
+          value: $(params.BUILDER_IMAGE)
+      runAfter:
+        - git-checkout
+      taskRef:
+        kind: ClusterTask
+        name: oci-image-build
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+  workspaces:
+    - name: shared-workspace
