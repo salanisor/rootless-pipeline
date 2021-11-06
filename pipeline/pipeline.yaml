@@ -2,7 +2,7 @@ apiVersion: tekton.dev/v1beta1
 kind: Pipeline
 metadata:
   name: oracle-database-base-image-build
-  namespace: pipelines-tutorial
+  namespace: rootless-pipeline
 spec:
   params:
     - default: 'https://github.com/salanisor/rootless-pipeline.git'
@@ -11,7 +11,7 @@ spec:
     - default: oracle-database-base-image-build
       name: PKR_VARS_SECRET_REF
       type: string
-    - default: main
+    - default: master
       name: GIT_REVISION
       type: string
     - default: 19.3.0
@@ -45,7 +45,7 @@ spec:
     - name: build-image
       params:
         - name: CONTEXT_DIR
-          value: $(params.CONTEXT_DIR)/$(params.DATABASE_VERSION)
+          value: $(params.CONTEXT_DIR)/
         - name: LABELS_FILE
           value: .pipeline/image-labels
         - name: IMAGE_BUILD
