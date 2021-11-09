@@ -29,8 +29,7 @@ RUN yum -y install unzip gcc file hostname which util-linux && rm -rf /var/cache
 
 # Copy packages
 # -------------
-RUN  chown oracle:oracle -R /u01 && \
-     chmod +x /u01/oracle/init.sh
+RUN  chown oracle:oracle -R /u01
 
 USER oracle
 WORKDIR /u01/oracle
