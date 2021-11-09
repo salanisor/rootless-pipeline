@@ -10,7 +10,7 @@
 # FROM docker.io/store/oracle/serverjre:1.8.0_241-b07
 # FROM https://registry.access.redhat.com/openjdk/openjdk-11-rhel7:1.10-1.1634744381
 # FROM quay.io/canit0/serverjre:1.8.0_241-b07
-FROM docker.io/library/oraclelinux:7-slim
+FROM quay.io/canit0/oraclelinux:7-slim
 
 MAINTAINER Judy Liu <judy.liu@oracle.com>
 
