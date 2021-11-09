@@ -7,7 +7,7 @@
 #
 
 # Pull base image
-FROM docker.io/oracle/serverjre:8
+FROM docker.io/store/oracle/serverjre:1.8.0_241-b07
 
 MAINTAINER Judy Liu <judy.liu@oracle.com>
 
