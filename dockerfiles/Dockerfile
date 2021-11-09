@@ -7,8 +7,8 @@
 #
 
 # Pull base image
-# FROM docker.io/store/oracle/serverjre:1.8.0_241-b07
-FROM https://registry.access.redhat.com/openjdk/openjdk-11-rhel7:1.10-1.1634744381
+FROM docker.io/store/oracle/serverjre:1.8.0_241-b07
+# FROM https://registry.access.redhat.com/openjdk/openjdk-11-rhel7:1.10-1.1634744381
 
 MAINTAINER Judy Liu <judy.liu@oracle.com>
 
